@@ -102,7 +102,7 @@ elif [ "$choice" == "2" ]; then
         exit 1
     fi
 
-    show "PoP mining has started in the detached screen session named 'heminode'."
+    show "PoP mining has started in the detached screen session named 'airdropnode'."
 else
     show "Invalid choice."
     exit 1
