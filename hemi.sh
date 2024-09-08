@@ -107,3 +107,6 @@ else
     show "Invalid choice."
     exit 1
 fi
+
+echo -e "${BOLD_PINK} Join airdrop node https://t.me/airdrop_node ${RESET_COLOR}"
+
