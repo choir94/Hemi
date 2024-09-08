@@ -48,8 +48,8 @@ fi
 
 echo
 show "Select only one option:"
-show "1. Use new wallet for PoP mining"
-show "2. Use existing wallet for PoP mining"
+show "1. Buat wallet baru"
+show "2. Import wallet aja"
 read -p "Enter your choice (1/2): " choice
 echo
 
@@ -66,7 +66,7 @@ if [ "$choice" == "1" ]; then
     echo
     if [[ "$saved" =~ ^[Yy]$ ]]; then
         pubkey_hash=$(jq -r '.pubkey_hash' ~/popm-address.json)
-        show "Join : https://discord.gg/hemixyz"
+        show "Join klaim faucetnya: https://discord.gg/hemixyz"
         show "Request faucet from faucet channel to this address: $pubkey_hash"
         echo
         read -p "Have you requested faucet? (y/N): " faucet_requested
