@@ -48,8 +48,8 @@ fi
 
 echo
 show "Select only one option:"
-show "1. Use new wallet for PoP mining"
-show "2. Use existing wallet for PoP mining"
+show "1. Buat Wallet Baru recomended"
+show "2. Use existing wallet"
 read -p "Enter your choice (1/2): " choice
 echo
 
