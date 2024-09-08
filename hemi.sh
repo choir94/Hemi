@@ -8,22 +8,38 @@ ARCH=$(uname -m)
 
 show "Checking your system architecture: $ARCH"
 echo
-sudo apt-get install -y screen > /dev/null 2>&1
+
+if ! command -v screen &> /dev/null; then
+    show "Screen not found, installing..."
+    sudo apt-get update
+    sudo apt-get install -y screen > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        show "Failed to install screen. Please check your package manager."
+        exit 1
+    fi
+fi
+
+if ! command -v jq &> /dev/null; then
+    show "jq not found, installing..."
+    sudo apt-get update
+    sudo apt-get install -y jq > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        show "Failed to install jq. Please check your package manager."
+        exit 1
+    fi
+fi
 
 if [ "$ARCH" == "x86_64" ]; then
     show "Downloading for x86_64 architecture..."
     wget --quiet --show-progress https://github.com/hemilabs/heminetwork/releases/download/v0.3.13/heminetwork_v0.3.13_linux_amd64.tar.gz -O heminetwork_v0.3.13_linux_amd64.tar.gz
-
     tar -xzf heminetwork_v0.3.13_linux_amd64.tar.gz > /dev/null
-    cd heminetwork_v0.3.13_linux_amd64
+    cd heminetwork_v0.3.13_linux_amd64 || { show "Failed to change directory."; exit 1; }
 
 elif [ "$ARCH" == "arm64" ]; then
     show "Downloading for arm64 architecture..."
     wget --quiet --show-progress https://github.com/hemilabs/heminetwork/releases/download/v0.3.13/heminetwork_v0.3.13_linux_arm64.tar.gz -O heminetwork_v0.3.13_linux_arm64.tar.gz
-
-    # Extract the archive without showing messages or progress bar
     tar -xzf heminetwork_v0.3.13_linux_arm64.tar.gz > /dev/null
-    cd heminetwork_v0.3.13_linux_arm64
+    cd heminetwork_v0.3.13_linux_arm64 || { show "Failed to change directory."; exit 1; }
 
 else
     show "Unsupported architecture: $ARCH"
@@ -40,6 +56,10 @@ echo
 if [ "$choice" == "1" ]; then
     show "Generating a new wallet..."
     ./keygen -secp256k1 -json -net="testnet" > ~/popm-address.json
+    if [ $? -ne 0 ]; then
+        show "Failed to generate wallet."
+        exit 1
+    fi
     cat ~/popm-address.json
     echo
     read -p "Have you saved the above details? (y/N): " saved
@@ -58,9 +78,13 @@ if [ "$choice" == "1" ]; then
             export POPM_STATIC_FEE="$static_fee"
             export POPM_BFG_URL="wss://testnet.rpc.hemi.network/v1/ws/public"
             
-            screen -dmS hemipop ./popmd
-            
-            show "PoP mining has started in the detached screen session named 'hemipop'."
+            screen -dmS heminode ./popmd
+            if [ $? -ne 0 ]; then
+                show "Failed to start PoP mining in screen session."
+                exit 1
+            fi
+
+            show "PoP mining has started in the detached screen session named 'heminode'."
         fi
     fi
 
@@ -72,9 +96,13 @@ elif [ "$choice" == "2" ]; then
     export POPM_STATIC_FEE="$static_fee"
     export POPM_BFG_URL="wss://testnet.rpc.hemi.network/v1/ws/public"
     
-    screen -dmS hemipop ./popmd
-    
-    show "PoP mining has started in the detached screen session named 'hemipop'."
+    screen -dmS heminode ./popmd
+    if [ $? -ne 0 ]; then
+        show "Failed to start PoP mining in screen session."
+        exit 1
+    fi
+
+    show "PoP mining has started in the detached screen session named 'heminode'."
 else
     show "Invalid choice."
     exit 1
