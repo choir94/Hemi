@@ -3,21 +3,11 @@
 show() {
     echo -e "\e[1;34m$1\e[0m"
 }
-
 ARCH=$(uname -m)
 
-show "Checking your system architecture: $ARCH"
-echo
-
-if ! command -v screen &> /dev/null; then
-    show "Screen not found, installing..."
-    sudo apt-get update
-    sudo apt-get install -y screen > /dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        show "Failed to install screen. Please check your package manager."
-        exit 1
-    fi
-fi
+show() {
+    echo -e "\033[1;35m$1\033[0m"
+}
 
 if ! command -v jq &> /dev/null; then
     show "jq not found, installing..."
@@ -29,7 +19,8 @@ if ! command -v jq &> /dev/null; then
     fi
 fi
 
-if check_latest_version() {
+
+check_latest_version() {
     for i in {1..3}; do
         LATEST_VERSION=$(curl -s https://api.github.com/repos/hemilabs/heminetwork/releases/latest | jq -r '.tag_name')
         if [ -n "$LATEST_VERSION" ]; then
@@ -81,6 +72,7 @@ if [ "$download_required" = true ]; then
 else
     show "Skipping download as the latest version is already present."
 fi
+
 
 echo
 show "Select only one option:"
