@@ -1,8 +1,4 @@
 #!/bin/bash
-
-show() {
-    echo -e "\e[1;34m$1\e[0m"
-}
 ARCH=$(uname -m)
 
 show() {
@@ -72,7 +68,6 @@ if [ "$download_required" = true ]; then
 else
     show "Skipping download as the latest version is already present."
 fi
-
 
 echo
 show "Select only one option:"
