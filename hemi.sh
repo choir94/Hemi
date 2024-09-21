@@ -29,21 +29,57 @@ if ! command -v jq &> /dev/null; then
     fi
 fi
 
-if [ "$ARCH" == "x86_64" ]; then
-    show "Downloading for x86_64 architecture..."
-    wget --quiet --show-progress https://github.com/hemilabs/heminetwork/releases/download/v0.4.3/heminetwork_v0.4.3_linux_amd64.tar.gz -O heminetwork_v0.4.3_linux_amd64.tar.gz
-    tar -xzf heminetwork_v0.4.3_linux_amd64.tar.gz > /dev/null
-    cd heminetwork_v0.4.3_linux_amd64 || { show "Failed to change directory."; exit 1; }
+if check_latest_version() {
+    for i in {1..3}; do
+        LATEST_VERSION=$(curl -s https://api.github.com/repos/hemilabs/heminetwork/releases/latest | jq -r '.tag_name')
+        if [ -n "$LATEST_VERSION" ]; then
+            show "Latest version available: $LATEST_VERSION"
+            return 0
+        fi
+        show "Attempt $i: Failed to fetch the latest version. Retrying..."
+        sleep 2
+    done
 
-elif [ "$ARCH" == "arm64" ]; then
-    show "Downloading for arm64 architecture..."
-    wget --quiet --show-progress https://github.com/hemilabs/heminetwork/releases/download/v0.4.3/heminetwork_v0.4.3_linux_amd64.tar.gz -O heminetwork_v0.4.3_linux_amd64.tar.gz
-    tar -xzf heminetwork_v0.4.3_linux_amd64.tar.gz > /dev/null
-    cd heminetwork_v0.4.3_linux_arm64 || { show "Failed to change directory."; exit 1; }
-
-else
-    show "Unsupported architecture: $ARCH"
+    show "Failed to fetch the latest version after 3 attempts. Please check your internet connection or GitHub API limits."
     exit 1
+}
+
+check_latest_version
+
+
+download_required=true
+
+if [ "$ARCH" == "x86_64" ]; then
+    if [ -d "heminetwork_${LATEST_VERSION}_linux_amd64" ]; then
+        show "Latest version for x86_64 is already downloaded. Skipping download."
+        cd "heminetwork_${LATEST_VERSION}_linux_amd64" || { show "Failed to change directory."; exit 1; }
+        download_required=false  # Set flag to false
+    fi
+elif [ "$ARCH" == "arm64" ]; then
+    if [ -d "heminetwork_${LATEST_VERSION}_linux_arm64" ]; then
+        show "Latest version for arm64 is already downloaded. Skipping download."
+        cd "heminetwork_${LATEST_VERSION}_linux_arm64" || { show "Failed to change directory."; exit 1; }
+        download_required=false  # Set flag to false
+    fi
+fi
+
+if [ "$download_required" = true ]; then
+    if [ "$ARCH" == "x86_64" ]; then
+        show "Downloading for x86_64 architecture..."
+        wget --quiet --show-progress "https://github.com/hemilabs/heminetwork/releases/download/$LATEST_VERSION/heminetwork_${LATEST_VERSION}_linux_amd64.tar.gz" -O "heminetwork_${LATEST_VERSION}_linux_amd64.tar.gz"
+        tar -xzf "heminetwork_${LATEST_VERSION}_linux_amd64.tar.gz" > /dev/null
+        cd "heminetwork_${LATEST_VERSION}_linux_amd64" || { show "Failed to change directory."; exit 1; }
+    elif [ "$ARCH" == "arm64" ]; then
+        show "Downloading for arm64 architecture..."
+        wget --quiet --show-progress "https://github.com/hemilabs/heminetwork/releases/download/$LATEST_VERSION/heminetwork_${LATEST_VERSION}_linux_arm64.tar.gz" -O "heminetwork_${LATEST_VERSION}_linux_arm64.tar.gz"
+        tar -xzf "heminetwork_${LATEST_VERSION}_linux_arm64.tar.gz" > /dev/null
+        cd "heminetwork_${LATEST_VERSION}_linux_arm64" || { show "Failed to change directory."; exit 1; }
+    else
+        show "Unsupported architecture: $ARCH"
+        exit 1
+    fi
+else
+    show "Skipping download as the latest version is already present."
 fi
 
 echo
