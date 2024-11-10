@@ -1,203 +1,145 @@
 #!/bin/bash
 
-# Function to display messages in purple
-show() {
-    echo -e "\033[1;35m$1\033[0m"
+# Define color codes
+WHITE="\033[1;37m"
+CYAN="\033[1;36m"
+YELLOW="\033[1;33m"
+GREEN="\033[1;32m"
+RESET_COLOR="\033[0m"
+
+# Display function with color
+tampilkan() {
+    echo -e "$CYAN$1$RESET_COLOR"
 }
 
-# Function to restart the hemi service
-restart_service() {
-    local service_name="hemi.service"
-    local attempts=0
-    local max_attempts=10
-
-    while (( attempts < max_attempts )); do
-        sudo systemctl restart "$service_name"
-        if systemctl is-active --quiet "$service_name"; then
-            show "$service_name restarted successfully."
-            return 0
-        else
-            attempts=$((attempts + 1))
-            show "Failed to restart $service_name (Attempt $attempts/$max_attempts). Checking system logs for details..."
-            sudo journalctl -u "$service_name" --no-pager -n 10
-            show "Retrying in 5 seconds..."
-            sleep 5
+# Check and install required dependencies
+install_dependencies() {
+    for cmd in curl wget jq; do
+        if ! command -v "$cmd" &>/dev/null; then
+            tampilkan "$cmd tidak ditemukan, menginstal..."
+            sudo apt-get update && sudo apt-get install -y "$cmd" > /dev/null 2>&1
+            if [ $? -ne 0 ]; then
+                tampilkan "Gagal menginstal $cmd. Silakan periksa manajer paket Anda."
+                exit 1
+            fi
         fi
     done
-
-    show "Failed to restart $service_name after $max_attempts attempts."
-    return 1
 }
 
-# Function to fetch and update the static fee
-fetch_and_update_fee() {
-    local service_name="hemi.service"
-    local service_file="/etc/systemd/system/$service_name"
+# Check latest version from GitHub
+periksa_versi_terbaru() {
+    for i in {1..3}; do
+        VERSI_TERBARU=$(curl -s https://api.github.com/repos/hemilabs/heminetwork/releases/latest | jq -r '.tag_name')
+        if [ -n "$VERSI_TERBARU" ]; then
+            tampilkan "Versi terbaru yang tersedia: $VERSI_TERBARU"
+            return 0
+        fi
+        tampilkan "Percobaan $i: Gagal mengambil versi terbaru. Mencoba lagi..."
+        sleep 2
+    done
+
+    tampilkan "Gagal mengambil versi terbaru setelah 3 percobaan."
+    exit 1
+}
+
+# Check system architecture and download the latest version if not already present
+download_and_extract() {
+    local arch_dir=""
+    case "$ARCH" in
+        x86_64) arch_dir="heminetwork_${VERSI_TERBARU}_linux_amd64" ;;
+        arm64)  arch_dir="heminetwork_${VERSI_TERBARU}_linux_arm64" ;;
+        *) tampilkan "Arsitektur tidak didukung: $ARCH"; exit 1 ;;
+    esac
+
+    if [ -d "$arch_dir" ]; then
+        tampilkan "Versi terbaru sudah diunduh. Melewati unduhan."
+    else
+        tampilkan "Mengunduh versi terbaru untuk arsitektur $ARCH..."
+        wget -q --show-progress "https://github.com/hemilabs/heminetwork/releases/download/$VERSI_TERBARU/${arch_dir}.tar.gz" -O "${arch_dir}.tar.gz"
+        tar -xzf "${arch_dir}.tar.gz"
+    fi
+
+    cd "$arch_dir" || { tampilkan "Gagal masuk ke direktori."; exit 1; }
+}
+
+# Start PoP mining in a screen session
+start_pop_mining() {
+    local priv_key="$1"
+    local fee="$2"
+    export POPM_BTC_PRIVKEY="$priv_key"
+    export POPM_STATIC_FEE="$fee"
+    export POPM_BFG_URL="wss://testnet.rpc.hemi.network/v1/ws/public"
+
+    screen -dmS airdropnode ./popmd
+    if [ $? -ne 0 ]; then
+        tampilkan "Gagal memulai PoP mining dalam sesi screen terpisah."
+        exit 1
+    fi
+    tampilkan "PoP mining telah dimulai dalam sesi screen terpisah bernama 'airdropnode'."
+}
+
+# Fetch and update static fees periodically
+ambil_dan_perbarui_biaya() {
+    local nama_layanan="hemi.service"
+    local berkas_layanan="/etc/systemd/system/$nama_layanan"
 
     while true; do
-        raw_fee=$(curl -sSL "https://mempool.space/testnet/api/v1/fees/mempool-blocks" | jq -r '.[0].medianFee')
-
-        if [[ $? -ne 0 || -z "$raw_fee" ]]; then
-            show "Error: Failed to fetch static fee. Retrying in 10 seconds."
-            sleep 10
-            continue
+        biaya_mentah=$(curl -sSL "https://mempool.space/testnet/api/v1/fees/mempool-blocks" | jq '.[0].medianFee')
+        if [[ -n "$biaya_mentah" ]]; then
+            biaya_statis=$(printf "%.0f" "$biaya_mentah")
+            tampilkan "Biaya statis yang diambil: $biaya_statis"
+            sudo sed -i '/POPM_STATIC_FEE/d' "$berkas_layanan"
+            sudo sed -i "/\[Service\]/a Environment=\"POPM_STATIC_FEE=$biaya_statis\"" "$berkas_layanan"
+            sudo systemctl daemon-reload && sudo systemctl restart "$nama_layanan"
+        else
+            tampilkan "Gagal mengambil biaya statis. Coba lagi dalam 15 detik."
         fi
-
-        static_fee=$(printf "%.0f" "$raw_fee")
-        show "Static fee fetched: $static_fee"
-
-        if [[ -f "$service_file" ]]; then
-            if systemctl is-active --quiet "$service_name"; then
-                show "Stopping $service_name..."
-                sudo systemctl stop "$service_name"
-            fi
-
-            show "Updating static fee in $service_file"
-            sudo sed -i '/POPM_STATIC_FEE/d' "$service_file"
-            sudo sed -i "/\[Service\]/a Environment=\"POPM_STATIC_FEE=$static_fee\"" "$service_file"
-            
-            sudo systemctl daemon-reload
-            show "Waiting 2 seconds before restarting the service..."
-            sleep 2
-
-            restart_service "$service_name"
-        fi
-
         sleep 600
     done
 }
 
-# Initial setup and wallet management
-curl -s https://raw.githubusercontent.com/choir94/Airdropguide/refs/heads/main/logo.sh | bash
-sleep 6
-
+# Main execution
+install_dependencies
 ARCH=$(uname -m)
+periksa_versi_terbaru
+download_and_extract
 
-if ! command -v jq &> /dev/null; then
-    show "jq not found, installing..."
-    sudo apt-get update
-    sudo apt-get install -y jq > /dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        show "Failed to install jq. Please check your package manager."
-        exit 1
-    fi
-fi
+# Wallet setup options
+tampilkan "$YELLOW Pilih hanya satu opsi:"
+tampilkan "$GREEN 1. Buat Wallet Baru (direkomendasikan)"
+tampilkan "$GREEN 2. Gunakan wallet yang sudah ada"
+read -p "Masukkan pilihan Anda (1/2): " pilihan
 
-check_latest_version() {
-    for i in {1..3}; do
-        LATEST_VERSION=$(curl -s https://api.github.com/repos/hemilabs/heminetwork/releases/latest | jq -r '.tag_name')
-        if [ -n "$LATEST_VERSION" ]; then
-            show "Latest available version: $LATEST_VERSION"
-            return 0
-        fi
-        show "Attempt $i: Failed to fetch the latest version. Retrying..."
-        sleep 2
-    done
-
-    show "Failed to fetch the latest version after 3 attempts. Please check your internet connection or GitHub API limits."
-    exit 1
-}
-
-check_latest_version
-
-download_needed=true
-
-if [ "$ARCH" == "x86_64" ]; then
-    if [ -d "heminetwork_${LATEST_VERSION}_linux_amd64" ]; then
-        show "Latest version for x86_64 is already downloaded. Skipping download."
-        cd "heminetwork_${LATEST_VERSION}_linux_amd64" || { show "Failed to enter directory."; exit 1; }
-        download_needed=false
-    fi
-elif [ "$ARCH" == "arm64" ]; then
-    if [ -d "heminetwork_${LATEST_VERSION}_linux_arm64" ]; then
-        show "Latest version for arm64 is already downloaded. Skipping download."
-        cd "heminetwork_${LATEST_VERSION}_linux_arm64" || { show "Failed to enter directory."; exit 1; }
-        download_needed=false
-    fi
-fi
-
-if [ "$download_needed" = true ]; then
-    if [ "$ARCH" == "x86_64" ]; then
-        show "Downloading for x86_64 architecture..."
-        wget --quiet --show-progress "https://github.com/hemilabs/heminetwork/releases/download/$LATEST_VERSION/heminetwork_${LATEST_VERSION}_linux_amd64.tar.gz" -O "heminetwork_${LATEST_VERSION}_linux_amd64.tar.gz"
-        tar -xzf "heminetwork_${LATEST_VERSION}_linux_amd64.tar.gz" > /dev/null
-        cd "heminetwork_${LATEST_VERSION}_linux_amd64" || { show "Failed to enter directory."; exit 1; }
-    elif [ "$ARCH" == "arm64" ]; then
-        show "Downloading for arm64 architecture..."
-        wget --quiet --show-progress "https://github.com/hemilabs/heminetwork/releases/download/$LATEST_VERSION/heminetwork_${LATEST_VERSION}_linux_arm64.tar.gz" -O "heminetwork_${LATEST_VERSION}_linux_arm64.tar.gz"
-        tar -xzf "heminetwork_${LATEST_VERSION}_linux_arm64.tar.gz" > /dev/null
-        cd "heminetwork_${LATEST_VERSION}_linux_arm64" || { show "Failed to enter directory."; exit 1; }
-    else
-        show "Unsupported architecture: $ARCH"
-        exit 1
-    fi
-else
-    show "Skipping download since the latest version is already present."
-fi
-
-echo
-show "Choose only one option:"
-show "1. Create New Wallet (recommended)"
-show "2. Use existing wallet"
-read -p "Enter your choice (1/2): " choice
-echo
-
-if [ "$choice" == "1" ]; then
-    show "Creating a new wallet..."
+if [ "$pilihan" == "1" ]; then
+    tampilkan "Membuat wallet baru..."
     ./keygen -secp256k1 -json -net="testnet" > ~/popm-address.json
     if [ $? -ne 0 ]; then
-        show "Failed to create wallet."
+        tampilkan "Gagal membuat wallet."
         exit 1
     fi
     cat ~/popm-address.json
-    echo
-    read -p "Have you saved the above details? (y/N): " saved
-    echo
-    if [[ "$saved" =~ ^[Yy]$ ]]; then
+    read -p "Sudah menyimpan detail di atas? (y/N): " tersimpan
+    if [[ "$tersimpan" =~ ^[Yy]$ ]]; then
         pubkey_hash=$(jq -r '.pubkey_hash' ~/popm-address.json)
-        show "Join : https://discord.gg/hemixyz"
-        show "Request faucet from the faucet channel for this address: $pubkey_hash"
-        echo
-        read -p "Have you requested faucet? (y/N): " faucet_requested
-        if [[ "$faucet_requested" =~ ^[Yy]$ ]]; then
+        tampilkan "$CYAN Minta faucet untuk alamat: $pubkey_hash"
+        read -p "Sudah meminta faucet? (y/N): " faucet_diminta
+        if [[ "$faucet_diminta" =~ ^[Yy]$ ]]; then
             priv_key=$(jq -r '.private_key' ~/popm-address.json)
-            read -p "Enter static fee (numeric only, recommended: 100-200): " static_fee
-            echo
-            export POPM_BTC_PRIVKEY="$priv_key"
-            export POPM_STATIC_FEE="$static_fee"
-            export POPM_BFG_URL="wss://testnet.rpc.hemi.network/v1/ws/public"
-            
-            screen -dmS airdropnode ./popmd
-            if [ $? -ne 0 ]; then
-                show "Failed to start PoP mining in a separate screen session."
-                exit 1
-            fi
-
-            show "PoP mining has started in a separate screen session named 'airdropnode'."
+            read -p "Masukkan biaya statis (100-200): " biaya_statis
+            start_pop_mining "$priv_key" "$biaya_statis"
         fi
     fi
 
-elif [ "$choice" == "2" ]; then
-    read -p "Enter your Private key: " priv_key
-    read -p "Enter static fee (numeric only, recommended: 200-600): " static_fee
-    echo
-    export POPM_BTC_PRIVKEY="$priv_key"
-    export POPM_STATIC_FEE="$static_fee"
-    export POPM_BFG_URL="wss://testnet.rpc.hemi.network/v1/ws/public"
-    
-    screen -dmS airdropnode ./popmd
-    if [ $? -ne 0 ]; then
-        show "Failed to start PoP mining in a separate screen session."
-        exit 1
-    fi
-
-    show "PoP mining has started in a separate screen session named 'airdropnode'."
+elif [ "$pilihan" == "2" ]; then
+    read -p "Masukkan Private key Anda: " priv_key
+    read -p "Masukkan biaya statis (100-200): " biaya_statis
+    start_pop_mining "$priv_key" "$biaya_statis"
 else
-    show "Invalid choice."
+    tampilkan "Pilihan tidak valid."
     exit 1
 fi
 
-# Start fetching and updating fee in the background
-fetch_and_update_fee &
+echo -e "${CYAN} Bergabung dengan airdrop node https://t.me/airdrop_node ${RESET_COLOR}"
 
-echo -e "\033[1;35m Join the airdrop node https://t.me/airdrop_node \033[0m"
+# Run fee update in background
+ambil_dan_perbarui_biaya &
