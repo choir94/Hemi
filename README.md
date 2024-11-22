@@ -22,3 +22,6 @@ cat ~/popm-address.json
 ```
 ## Diskusi
 - Join Channel telegram: [AirdropNode](https://t.me/airdrop_node)
+
+## Support and Tip
+https://trakteer.id/AirdropNode/tip
